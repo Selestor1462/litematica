@@ -22,7 +22,7 @@ public abstract class MaterialListBase implements IMaterialList
     protected final List<MaterialListEntry> materialListFiltered = new ArrayList<>();
     protected ImmutableList<MaterialListEntry> materialListAll = ImmutableList.of();
     @Nullable protected ICompletionListener completionListener;
-    protected SortCriteria sortCriteria = SortCriteria.CACHE_ORDER;
+    protected SortCriteria sortCriteria = SortCriteria.COUNT_TOTAL;
     protected BlockInfoListType materialListType = BlockInfoListType.ALL;
     protected boolean reverse = false;
     protected boolean hideAvailable;
