@@ -315,10 +315,6 @@ public class EntityUtils
                     entity.setUUID(UUID.randomUUID());
                 }
 
-                if (nbt.contains("LastEntityID", Constants.NBT.TAG_INT))
-                {
-                    entity.setId(nbt.getIntOrDefault("LastEntityID", -1));
-                }
 
                 if (Reference.DEBUG_MODE)
                 {
@@ -423,24 +419,16 @@ public class EntityUtils
         }
         else
         {
-            if (!Configs.Generic.DEDUPLICATE_SCHEMATIC_ENTITIES.getBooleanValue())
+            Entity other = world.getEntity(entity.getUUID());
+
+            if (other != null)
             {
-                // Check for a duplicate EntityID
-                Entity other = world.getEntity(entity.getId());
-
-                if (other != null)
+                if (other.getType().equals(entity.getType()) && other.position().distanceToSqr(entity.position()) < 0.001)
                 {
-                    // We don't like needing to use Random();
-                    // but I guess there's no other logical method for this.
-                    entity.setId(RAND.nextInt(entity.getId() * 4, Integer.MAX_VALUE));
+                    return;
                 }
 
-                other = world.getEntity(entity.getUUID());
-
-                if (other != null)
-                {
-                    entity.setUUID(UUID.randomUUID());
-                }
+                entity.setUUID(UUID.randomUUID());
             }
 
             try

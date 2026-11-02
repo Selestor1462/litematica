@@ -253,35 +253,21 @@ public class WorldSchematic extends Level
     {
         int chunkX = Mth.floor(entity.getX() / 16.0D);
         int chunkZ = Mth.floor(entity.getZ() / 16.0D);
+        ChunkPos chunkPos = new ChunkPos(chunkX, chunkZ);
 
-        if (this.entityLookup.contains(entity.getUUID()))
+        for (Entity e : this.entityLookup.getAllByChunk(chunkPos))
         {
-            if (Configs.Generic.DEDUPLICATE_SCHEMATIC_ENTITIES.getBooleanValue())
+            if (e != null && e.getType().equals(entity.getType()) && e.position().distanceToSqr(entity.position()) < 0.001)
             {
-                Entity e = this.entityLookup.get(entity.getUUID());
-
-                if (e != null && e.getType().equals(entity.getType()))
-                {
-                    if (e.position().equals(entity.position()))
-                    {
-                        return false;
-                    }
-
-                    this.entityLookup.remove(entity.getUUID(), this);
-                }
-                else
-                {
-                    return false;
-                }
-            }
-            else
-            {
-                // Entity UUID's *MUST* be unique
-                entity.setUUID(UUID.randomUUID());
+                return false;
             }
         }
 
-        ChunkPos chunkPos = new ChunkPos(chunkX, chunkZ);
+        if (this.entityLookup.contains(entity.getUUID()))
+        {
+            // Entity UUID's *MUST* be unique in the entity lookup
+            entity.setUUID(UUID.randomUUID());
+        }
 
         while (this.entityLookup.contains(entity.getId()) || entity.getId() < 0)
         {

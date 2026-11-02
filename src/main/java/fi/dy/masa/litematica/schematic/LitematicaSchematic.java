@@ -87,6 +87,7 @@ import fi.dy.masa.litematica.util.*;
 import fi.dy.masa.litematica.util.EntityUtils;
 import fi.dy.masa.litematica.util.WorldUtils;
 import fi.dy.masa.litematica.world.SchematicWorldHandler;
+import fi.dy.masa.litematica.world.WorldSchematic;
 
 public class LitematicaSchematic
 {
@@ -770,11 +771,29 @@ public class LitematicaSchematic
 		}
 	}
 
+	private boolean isEntityInsideBoxes(Entity entity, Collection<Box> boxes)
+	{
+		for (Box box : boxes)
+		{
+			BlockPos min = PositionUtils.getMinCorner(box.getPos1(), box.getPos2());
+			BlockPos max = PositionUtils.getMaxCorner(box.getPos1(), box.getPos2());
+
+			if (PositionUtils.isPositionInsideArea(entity.blockPosition(), min, max))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	/**
 	 * This version is not Chunk-Specific.  It is only used by {@link WorldUtils} during conversions.
 	 */
 	private void takeEntitiesFromWorld(Level world, List<Box> boxes, BlockPos origin)
 	{
+		Set<UUID> existingEntities = new HashSet<>();
+
 		for (Box box : boxes)
 		{
 			AABB bb = PositionUtils.createEnclosingAABB(box.getPos1(), box.getPos2());
@@ -788,6 +807,21 @@ public class LitematicaSchematic
 				{
 					continue;
 				}
+
+				UUID uuid = entity.getUUID();
+
+				if (existingEntities.contains(uuid))
+				{
+					continue;
+				}
+
+				// If entity is a passenger, and its root vehicle is also within the schematic selection,
+				// it will be saved as part of the vehicle's "Passengers" tag. Do not save it as a standalone entity.
+				if (entity.isPassenger() && entity.getRootVehicle() != null && this.isEntityInsideBoxes(entity.getRootVehicle(), boxes))
+				{
+					continue;
+				}
+
 				NbtView view = NbtView.getWriter(world.registryAccess());
 
 				entity.saveWithoutId(view.getWriter());
@@ -796,6 +830,7 @@ public class LitematicaSchematic
 
 				if (tag != null && id != null)
 				{
+					tag.remove("LastEntityID");
 					Vec3 posVec = new Vec3(entity.getX() - regionPosAbs.getX(), entity.getY() - regionPosAbs.getY(), entity.getZ() - regionPosAbs.getZ());
 
 					tag.putString("id", id.toString());
@@ -847,9 +882,14 @@ public class LitematicaSchematic
 						}
 					}
 
-//                    NbtUtils.putVec3dCodec(tag, posVec, "Pos");
 					DataTypeUtils.putVec3dCodec(tag, posVec, NbtKeys.POS);
 					list.add(new EntityInfo(posVec, tag));
+					existingEntities.add(uuid);
+
+					for (Entity p : entity.getIndirectPassengers())
+					{
+						existingEntities.add(p.getUUID());
+					}
 				}
 			}
 
@@ -885,107 +925,107 @@ public class LitematicaSchematic
 				{
 					continue;
 				}
+
 				UUID uuid = entity.getUUID();
-                /*
-                if (entity.posX >= bb.minX && entity.posX < bb.maxX &&
-                    entity.posY >= bb.minY && entity.posY < bb.maxY &&
-                    entity.posZ >= bb.minZ && entity.posZ < bb.maxZ)
-                */
-				if (existingEntities.contains(uuid) == false)
+
+				if (existingEntities.contains(uuid))
 				{
-					CompoundData tag = new CompoundData();
+					continue;
+				}
 
-					if (EntityDataManager.getInstance().hasServuxServer() || EntityDataManager.getInstance().hasBackupStatus())
+				// If entity is a passenger, and its root vehicle is also within the schematic selection,
+				// it will be saved as part of the vehicle's "Passengers" tag. Do not save it as a standalone entity.
+				if (entity.isPassenger() && entity.getRootVehicle() != null && this.isEntityInsideBoxes(entity.getRootVehicle(), boxes.values()))
+				{
+					continue;
+				}
+
+				CompoundData tag = new CompoundData();
+
+				if (world instanceof WorldSchematic == false &&
+				    (EntityDataManager.getInstance().hasServuxServer() || EntityDataManager.getInstance().hasBackupStatus()))
+				{
+					CompoundData serverTags = EntityDataManager.getInstance().getFromEntityCacheData(entity.getId());
+
+					if (serverTags != null && !serverTags.isEmpty())
 					{
-						CompoundData serverTags = EntityDataManager.getInstance().getFromEntityCacheData(entity.getId());
+						tag.combine(serverTags);
+					}
+				}
 
-						if (serverTags != null && !serverTags.isEmpty())
+				if (tag.isEmpty())
+				{
+					NbtView view = NbtView.getWriter(world.registryAccess());
+
+					entity.saveWithoutId(view.getWriter());
+					tag = view.readNbt() != null ? view.readData() : new CompoundData();
+					Identifier id = EntityType.getKey(entity.getType());
+
+					if (tag != null && id != null)
+					{
+						tag.putString("id", id.toString());
+					}
+				}
+
+				if (tag != null && !tag.isEmpty())
+				{
+					tag.remove("LastEntityID");
+					Vec3 posVec = new Vec3(entity.getX() - regionPosAbs.getX(), entity.getY() - regionPosAbs.getY(), entity.getZ() - regionPosAbs.getZ());
+
+					// Annoying special case for any hanging/decoration entities, to avoid the console
+					// warning about invalid hanging position when loading the entity from NBT
+					if (entity instanceof HangingEntity decorationEntity)
+					{
+						BlockPos p = decorationEntity.blockPosition();
+						tag.putInt("TileX", p.getX() - regionPosAbs.getX());
+						tag.putInt("TileY", p.getY() - regionPosAbs.getY());
+						tag.putInt("TileZ", p.getZ() - regionPosAbs.getZ());
+					}
+
+					// Fix block_pos position
+					if (entity instanceof BlockAttachedEntity bae)
+					{
+						BlockPos p = bae.getPos();
+
+						if (p != null)
 						{
-							tag.combine(serverTags);
+							BlockPos pAdj = new BlockPos(p.getX() - regionPosAbs.getX(), p.getY() - regionPosAbs.getY(), p.getZ() - regionPosAbs.getZ());
+							tag.putCodec(NbtKeys.ATTACHED_BLOCK_POS, BlockPos.CODEC, pAdj);
 						}
 					}
-					else
+
+					// Fix leash position
+					if (entity instanceof Leashable le)
 					{
-						NbtView view = NbtView.getWriter(world.registryAccess());
+						Leashable.LeashData ld = le.getLeashData();
 
-						// Checks for Vehicle
-						if (entity.save(view.getWriter()))
+						if (ld != null && ld.leashHolder instanceof LeashFenceKnotEntity knot)
 						{
-							tag = view.readNbt() != null ? view.readData() : new CompoundData();
-							Identifier id = EntityType.getKey(entity.getType());
-
-							if (tag != null && id != null)
-							{
-								tag.putString("id", id.toString());
-								tag.putInt("LastEntityID", entity.getId());
-							}
+							BlockPos kp = knot.getPos();
+							BlockPos adjKp = new BlockPos(kp.getX() - regionPosAbs.getX(), kp.getY() - regionPosAbs.getY(), kp.getZ() - regionPosAbs.getZ());
+							tag.putCodec(NbtKeys.LEASH, BlockPos.CODEC, adjKp);
 						}
 					}
 
-//                    boolean hasVehicle = entity.hasVehicle();
-//                    boolean fixPassengers = tag.contains("Passengers");
-//                    Litematica.LOGGER.error("takeEntitiesFromWorldWithinChunk(): UUID: [{}], HasVehicle({}), HasPassengers({}), NBT: [{}]", uuid.toString(), hasVehicle, fixPassengers, tag.toString());
-
-//                    if (fixPassengers)
-//                    {
-//                        tag.put("Passengers", EntityUtils.updatePassengersToRelativeRegionPos(tag.getListOrEmpty("Passengers"), regionPosAbs));
-//                    }
-
-					if (!tag.isEmpty())
+					// Fix home_pos position
+					if (entity instanceof Mob m)
 					{
-						Vec3 posVec = new Vec3(entity.getX() - regionPosAbs.getX(), entity.getY() - regionPosAbs.getY(), entity.getZ() - regionPosAbs.getZ());
+						BlockPos hp = m.getHomePosition();
 
-						// Annoying special case for any hanging/decoration entities, to avoid the console
-						// warning about invalid hanging position when loading the entity from NBT
-						if (entity instanceof HangingEntity decorationEntity)
+						if (hp != null && m.hasHome() && !hp.equals(BlockPos.ZERO))
 						{
-							BlockPos p = decorationEntity.blockPosition();
-							tag.putInt("TileX", p.getX() - regionPosAbs.getX());
-							tag.putInt("TileY", p.getY() - regionPosAbs.getY());
-							tag.putInt("TileZ", p.getZ() - regionPosAbs.getZ());
+							BlockPos adjHp = new BlockPos(hp.getX() - regionPosAbs.getX(), hp.getY() - regionPosAbs.getY(), hp.getZ() - regionPosAbs.getZ());
+							tag.putCodec(NbtKeys.HOME_POS, BlockPos.CODEC, adjHp);
 						}
+					}
 
-						// Fix block_pos position
-						if (entity instanceof BlockAttachedEntity bae)
-						{
-							BlockPos p = bae.getPos();
+					DataTypeUtils.putVec3dCodec(tag, posVec, NbtKeys.POS);
+					list.add(new EntityInfo(posVec, tag));
+					existingEntities.add(uuid);
 
-							if (p != null)
-							{
-								BlockPos pAdj = new BlockPos(p.getX() - regionPosAbs.getX(), p.getY() - regionPosAbs.getY(), p.getZ() - regionPosAbs.getZ());
-								tag.putCodec(NbtKeys.ATTACHED_BLOCK_POS, BlockPos.CODEC, pAdj);
-							}
-						}
-
-						// Fix leash position
-						if (entity instanceof Leashable le)
-						{
-							Leashable.LeashData ld = le.getLeashData();
-
-							if (ld != null && ld.leashHolder instanceof LeashFenceKnotEntity knot)
-							{
-								BlockPos kp = knot.getPos();
-								BlockPos adjKp = new BlockPos(kp.getX() - regionPosAbs.getX(), kp.getY() - regionPosAbs.getY(), kp.getZ() - regionPosAbs.getZ());
-								tag.putCodec(NbtKeys.LEASH, BlockPos.CODEC, adjKp);
-							}
-						}
-
-						// Fix home_pos position
-						if (entity instanceof Mob m)
-						{
-							BlockPos hp = m.getHomePosition();
-
-							if (hp != null && m.hasHome() && !hp.equals(BlockPos.ZERO))
-							{
-								BlockPos adjHp = new BlockPos(hp.getX() - regionPosAbs.getX(), hp.getY() - regionPosAbs.getY(), hp.getZ() - regionPosAbs.getZ());
-								tag.putCodec(NbtKeys.HOME_POS, BlockPos.CODEC, adjHp);
-							}
-						}
-
-//                        NbtUtils.putVec3dCodec(tag, posVec, "Pos");
-						DataTypeUtils.putVec3dCodec(tag, posVec, NbtKeys.POS);
-						list.add(new EntityInfo(posVec, tag));
-						existingEntities.add(uuid);
+					for (Entity p : entity.getIndirectPassengers())
+					{
+						existingEntities.add(p.getUUID());
 					}
 				}
 			}

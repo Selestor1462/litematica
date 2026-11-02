@@ -161,7 +161,6 @@ public class Configs implements IConfigHandler
 				DISPLAY_FILE_OPS_FEEDBACK,
                 DATAFIXER_MODE,
                 DATAFIXER_DEFAULT_SCHEMA,
-                DEDUPLICATE_SCHEMATIC_ENTITIES,
                 EASY_PLACE_CLICK_ADJACENT,
                 EASY_PLACE_FIRST,
                 EASY_PLACE_HOLD_ENABLED,
